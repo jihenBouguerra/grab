@@ -13,7 +13,7 @@ It runs on your Mac and is made for your phone: open it over your home Wi-Fi,
 paste, tap, done. Background jobs with live progress bars keep working even
 if your phone locks mid-task.
 
-![Grab](screenshots/phone-script.png)
+
 
 ## Run
 
