@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f0f14">
+<title>Grab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬇️</text></svg>">
+<style>
+  :root {
+    --bg: #0f0f14;
+    --surface: #1a1a23;
+    --surface-2: #232330;
+    --border: #2e2e3e;
+    --text: #ececf1;
+    --text-dim: #9494a8;
+    --accent: #8b7cf6;
+    --accent-soft: rgba(139, 124, 246, 0.15);
+    --green: #4ade80;
+    --red: #f87171;
+    --radius: 16px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overscroll-behavior-y: none;
+  }
+  /* ---------- Header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(15, 15, 20, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: calc(env(safe-area-inset-top) + 14px) 16px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .header-row { display: flex; align-items: center; justify-content: space-between; }
+  h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
+  h1 .spark { color: var(--accent); }
+  .header-sub { color: var(--text-dim); font-size: 0.8rem; }
+  /* ---------- Main ---------- */
+  main { padding: 16px; max-width: 680px; margin: 0 auto; padding-bottom: calc(env(safe-area-inset-bottom) + 40px); }
+  /* ---------- Link card ---------- */
+  .link-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px; margin-bottom: 14px;
+  }
+  .link-card label {
+    display: block; font-size: 0.78rem; font-weight: 600;
+    color: var(--text-dim); margin-bottom: 8px;
+  }
+  .url-row { position: relative; }
+  #url {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 13px 40px 13px 14px;
+    color: var(--text); font-size: 1rem; outline: none;
+  }
+  #url:focus { border-color: var(--accent); }
+  #url::placeholder { color: var(--text-dim); }
+  #clearUrl {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--text-dim);
+    font-size: 1rem; padding: 8px 12px; cursor: pointer; display: none;
+  }
+  .link-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+  .paste-btn {
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid transparent; border-radius: 999px; padding: 9px 18px;
+    font-size: 0.85rem; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .paste-btn:active { opacity: 0.7; }
+  .fast-chip {
+    margin-left: auto;
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: 999px; padding: 9px 14px;
+    font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit;
+    white-space: nowrap;
+  }
+  .fast-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  @media (hover: hover) {
+    .paste-btn:hover, .fast-chip:hover, .action:hover:not(:disabled),
+    .copy-btn:hover { filter: brightness(1.15); }
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px; margin-bottom: 14px;
+    display: none; gap: 12px; align-items: center;
+  }
+  .card img { width: 76px; height: 76px; object-fit: cover; border-radius: 12px; background: var(--bg); flex-shrink: 0; }
+  .card-title { font-size: 0.98rem; font-weight: 600; line-height: 1.35; word-break: break-word; }
+  .card-meta { color: var(--text-dim); font-size: 0.8rem; margin-top: 4px; }
+  /* ---------- Action buttons ---------- */
+  .actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .action {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 6px;
+    color: var(--text); font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    font-family: inherit;
+  }
+  .action .ico { font-size: 1.5rem; }
+  .action:active { background: var(--surface-2); }
+  .action:disabled { opacity: 0.4; }
+  .action.working { border-color: var(--accent); background: var(--accent-soft); }
+  /* ---------- Status ---------- */
+  .status {
+    min-height: 24px; font-size: 0.88rem; color: var(--text-dim);
+    margin-bottom: 14px; padding: 0 2px; display: flex; align-items: center; gap: 8px;
+  }
+  .status.err { color: var(--red); }
+  .status.ok { color: var(--green); }
+  .spinner {
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* ---------- Progress bar ---------- */
+  #progressWrap { display: none; margin-bottom: 14px; }
+  .progress-label {
+    display: flex; justify-content: space-between;
+    color: var(--text-dim); font-size: 0.78rem; margin-bottom: 6px; padding: 0 2px;
+  }
+  .progress-label .pct { color: var(--accent); font-weight: 600; }
+  .progress-track {
+    height: 7px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 0%; background: var(--accent); border-radius: 999px;
+    transition: width 0.4s ease;
+  }
+  .progress-fill.indeterminate {
+    width: 35%;
+    animation: slide 1.2s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0% { margin-left: -35%; } 100% { margin-left: 100%; }
+  }
+  /* ---------- Script panel ---------- */
+  #scriptPanel { display: none; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .src-badge {
+    font-size: 0.72rem; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .copy-btn {
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 12px; padding: 10px 22px;
+    font-size: 0.88rem; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .copy-btn:active { opacity: 0.8; }
+  .script-content {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px; font-size: 0.92rem; line-height: 1.6; white-space: pre-wrap;
+    word-break: break-word; max-height: 48dvh; overflow-y: auto;
+    -webkit-user-select: text; user-select: text;
+  }
+  /* ---------- Toast ---------- */
+  #toast {
+    position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 40px);
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text); padding: 11px 22px; border-radius: 999px;
+    font-size: 0.88rem; font-weight: 500; z-index: 100;
+    opacity: 0; pointer-events: none; transition: all 0.25s; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-row">
+    <h1><span class="spark">✦</span> Grab</h1>
+    <span class="header-sub">video · audio · script</span>
+  </div>
+</header>
+
+<main>
+  <div class="link-card">
+    <label for="url">Link — Instagram, TikTok, YouTube, X…</label>
+    <div class="url-row">
+      <input id="url" type="url" placeholder="https://…"
+             autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button id="clearUrl" aria-label="Clear">✕</button>
+    </div>
+    <div class="link-actions">
+      <button class="paste-btn" id="pasteBtn">📋 Paste link</button>
+      <button class="fast-chip" id="fastChip" title="Faster transcription, louder fan">⚡ Fast mode</button>
+    </div>
+  </div>
+  <div class="card" id="infoCard">
+    <img id="thumb" alt="" referrerpolicy="no-referrer">
+    <div>
+      <div class="card-title" id="title"></div>
+      <div class="card-meta" id="meta"></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="action" id="bVideo"><span class="ico">🎬</span>Video</button>
+    <button class="action" id="bAudio"><span class="ico">🎧</span>Audio</button>
+    <button class="action" id="bScript"><span class="ico">📝</span>Script</button>
+  </div>
+
+  <div id="progressWrap">
+    <div class="progress-label">
+      <span id="progressStage"></span>
+      <span class="pct" id="progressPct"></span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div id="scriptPanel">
+    <div class="panel-head">
+      <span class="src-badge" id="srcBadge"></span>
+      <button class="copy-btn" id="copyBtn">📋 Copy</button>
+    </div>
+    <div class="script-content" id="scriptText"></div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const urlEl = $("url"), statusEl = $("status");
+  let infoTimer = null, pollTimer = null, scriptStartedAt = 0;
+
+  // ---------- Toast ----------
+  let toastTimer;
+  function toast(msg) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+  }
+
+  // ---------- Status ----------
+  function setStatus(msg, cls = "", spin = false) {
+    statusEl.className = "status " + cls;
+    statusEl.innerHTML = (spin ? '<span class="spinner"></span>' : "") + msg;
+  }
+  function setButtons(on) {
+    ["bVideo", "bAudio", "bScript"].forEach(id => { $(id).disabled = !on; });
+  }
+
+  // ---------- URL input ----------
+  $("pasteBtn").addEventListener("click", async () => {
+    try {
+      urlEl.value = (await navigator.clipboard.readText()).trim();
+      urlEl.dispatchEvent(new Event("input"));
+    } catch {
+      urlEl.focus();
+      toast("Clipboard blocked — long-press and paste");
+    }
+  });
+
+  $("clearUrl").addEventListener("click", () => {
+    urlEl.value = "";
+    urlEl.dispatchEvent(new Event("input"));
+    urlEl.focus();
+  });
+
+  urlEl.addEventListener("input", () => {
+    clearTimeout(infoTimer);
+    $("infoCard").style.display = "none";
+    $("clearUrl").style.display = urlEl.value ? "block" : "none";
+    if (!urlEl.value.trim().startsWith("http")) return;
+    infoTimer = setTimeout(fetchInfo, 400);
+  });
+
+  // ---------- Fast mode (⚡ more CPU, faster transcription) ----------
+  let fastMode = localStorage.getItem("grab.fast") === "1";
+  function renderFast() { $("fastChip").classList.toggle("on", fastMode); }
+  $("fastChip").addEventListener("click", () => {
+    fastMode = !fastMode;
+    localStorage.setItem("grab.fast", fastMode ? "1" : "0");
+    renderFast();
+    toast(fastMode ? "⚡ Fast mode on — louder fan, quicker scripts"
+                   : "Quiet mode — slower scripts, calm fan");
+  });
+  renderFast();
+
+  const fmtDur = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+
+  async function fetchInfo() {
+    setStatus("Looking up link…", "", true);
+    try {
+      const r = await fetch("/api/info", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: urlEl.value.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      $("title").textContent = d.title || "Untitled";
+      $("meta").textContent = [d.uploader, d.duration && fmtDur(d.duration)].filter(Boolean).join(" · ");
+      if (d.thumbnail) { $("thumb").src = d.thumbnail; $("thumb").style.display = ""; }
+      else $("thumb").style.display = "none";
+      $("infoCard").style.display = "flex";
+      setStatus("Ready — pick a format", "ok");
+    } catch (e) { setStatus(e.message, "err"); }
+  }
+
+  // ---------- Progress bar ----------
+  function showProgress(stage, pct) {
+    $("progressWrap").style.display = "block";
+    $("progressStage").textContent = stage || "Working…";
+    const fill = $("progressFill");
+    if (pct == null) {                       // unknown duration → sliding bar
+      fill.classList.add("indeterminate");
+      $("progressPct").textContent = "";
+    } else {
+      fill.classList.remove("indeterminate");
+      fill.style.width = pct + "%";
+      $("progressPct").textContent = pct + "%";
+    }
+  }
+  function hideProgress() {
+    $("progressWrap").style.display = "none";
+    $("progressFill").style.width = "0%";
+    $("progressFill").classList.remove("indeterminate");
+  }
+
+  // ---------- Unified job runner (video / audio / script) ----------
+  const BTN = { video: "bVideo", audio: "bAudio", script: "bScript" };
+  let activeJob = null;  // only one tracked at a time on screen
+
+  function jobDone(kind, d) {
+    activeJob = null;
+    clearInterval(pollTimer); pollTimer = null;
+    Object.values(BTN).forEach(id => { $(id).disabled = false; $(id).classList.remove("working"); });
+    hideProgress();
+    if (d.status === "error") { setStatus(d.error, "err"); return; }
+    if (kind === "script") {
+      $("scriptText").textContent = d.text;
+      $("srcBadge").textContent = d.source === "captions" ? "From captions" : "Transcribed locally";
+      $("scriptPanel").style.display = "block";
+      setStatus("Script ready", "ok");
+      toast("Script ready ✓");
+    } else {
+      window.location.href = "/api/take/" + d.token;
+      setStatus(`Saving ${(d.size / 1048576).toFixed(1)} MB — check your downloads`, "ok");
+      toast("Download started ✓");
+    }
+  }
+
+  async function jobTick(kind, url, poll) {
+    try {
+      const r = await fetch("/api/job", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, kind, poll, fast: fastMode }),
+      });
+      const d = await r.json();
+      if (!r.ok) { jobDone(kind, { status: "error", error: d.error }); return; }
+      if (d.status === "running") {
+        const mins = Math.floor((Date.now() - scriptStartedAt) / 60000);
+        showProgress(d.stage + (mins ? ` · ${mins} min` : ""), d.progress);
+        setStatus("", "");
+      } else {
+        jobDone(kind, d);
+      }
+    } catch { /* transient network blip — keep polling */ }
+  }
+
+  function startJob(kind) {
+    const url = urlEl.value.trim();
+    if (!url) { toast("Paste a link first"); return; }
+    if (activeJob) { toast("Wait for the current task to finish"); return; }
+    activeJob = kind;
+    $("scriptPanel").style.display = kind === "script" ? "none" : $("scriptPanel").style.display;
+    Object.values(BTN).forEach(id => { $(id).disabled = true; });
+    $(BTN[kind]).classList.add("working");
+    $(BTN[kind]).disabled = false;       // stays tappable-looking, shows pulse
+    scriptStartedAt = Date.now();
+    showProgress("Starting…", null);
+    setStatus("", "");
+    jobTick(kind, url, false);
+    pollTimer = setInterval(() => jobTick(kind, url, true), 1500);
+  }
+
+  $("bVideo").addEventListener("click", () => startJob("video"));
+  $("bAudio").addEventListener("click", () => startJob("audio"));
+  $("bScript").addEventListener("click", () => startJob("script"));
+
+  // If the page reloads (or the phone slept) while a job was running,
+  // pressing the same button again re-attaches to the same job server-side.
+
+  // ---------- Demo mode (for README screenshots): /?demo=script|progress ----------
+  const demo = new URLSearchParams(location.search).get("demo");
+  if (demo) {
+    urlEl.value = "https://www.youtube.com/watch?v=QClcSZV7Upk";
+    $("clearUrl").style.display = "block";
+    $("title").textContent = "Personal Finance 101 — Budgeting & Debt Payoff";
+    $("meta").textContent = "Trail Mix Wealth · 13:54";
+    $("thumb").src = "https://i.ytimg.com/vi/QClcSZV7Upk/hqdefault.jpg";
+    $("infoCard").style.display = "flex";
+    if (demo === "progress") {
+      showProgress("Transcribing", 62);
+    } else {
+      $("scriptText").textContent =
+        "Welcome to Building Wealth for Two.\nBy the end of this video, you'll know how " +
+        "to align with your partner to avoid tension and build wealth.\n\nAll right, " +
+        "personal finance 101. This video is your financial base camp and everything " +
+        "we cover later sits on top of these principles. By the end of this video " +
+        "you'll have the building blocks for your financial freedom — we'll be " +
+        "covering budgeting, emergency funds, and debt payoff…";
+      $("srcBadge").textContent = "Transcribed locally";
+      $("scriptPanel").style.display = "block";
+      setStatus("Script ready", "ok");
+    }
+  }
+
+  // ---------- Copy ----------
+  $("copyBtn").addEventListener("click", async () => {
+    const text = $("scriptText").textContent;
+    let ok = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); ok = true; } catch {}
+    }
+    if (!ok) {
+      // Plain-HTTP fallback (LAN access from a phone has no secure context)
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus(); ta.setSelectionRange(0, text.length);
+      try { ok = document.execCommand("copy"); } catch {}
+      ta.remove();
+    }
+    toast(ok ? "Copied to clipboard ✓" : "⚠️ Select the text and copy manually");
+  });
+})();
+</script>
+</body>
+</html>
