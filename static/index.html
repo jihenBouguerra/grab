@@ -159,7 +159,17 @@
     padding: 14px; font-size: 0.92rem; line-height: 1.6; white-space: pre-wrap;
     word-break: break-word; max-height: 48dvh; overflow-y: auto;
     -webkit-user-select: text; user-select: text;
+    /* RTL languages (Arabic) align right, per line, automatically */
+    unicode-bidi: plaintext; text-align: start;
+    /* themed scrollbar instead of the default bright one */
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
   }
+  .script-content::-webkit-scrollbar { width: 8px; }
+  .script-content::-webkit-scrollbar-track { background: transparent; }
+  .script-content::-webkit-scrollbar-thumb {
+    background: var(--border); border-radius: 999px;
+  }
+  .script-content::-webkit-scrollbar-thumb:hover { background: var(--surface-2); }
   /* ---------- Toast ---------- */
   #toast {
     position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 40px);
@@ -395,6 +405,16 @@
     $("infoCard").style.display = "flex";
     if (demo === "progress") {
       showProgress("Transcribing", 62);
+    } else if (demo === "ar") {
+      $("scriptText").textContent =
+        "وتجعل منه تحد ممتع ومسل\nبحيث يعتمد المبلغ المدخر\nالذي ستصل إليه في نهاية العام\n" +
+        "على القيمة التي سوف تدخرها بدءاً من الأسبوع الأول\nفمثلا إذا قمت بادخار دولار في " +
+        "الأسبوع الأول\nمعنى هذا أنك ستدخر دولاران في الأسبوع الثاني\nوثلاثة دولارات في " +
+        "الأسبوع الثالث\nوهكذا ووفقا للموقع المالي\nإذا كنت غير مشترك بالقناة\nفاشترك الآن\n" +
+        "video جديد وفعل الجرس ليس لك كل\nمرحباً";
+      $("srcBadge").textContent = "Transcribed locally";
+      $("scriptPanel").style.display = "block";
+      setStatus("Script ready", "ok");
     } else {
       $("scriptText").textContent =
         "Welcome to Building Wealth for Two.\nBy the end of this video, you'll know how " +
