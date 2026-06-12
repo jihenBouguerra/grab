@@ -12,11 +12,11 @@ import certifi
 # macOS Python ships without CA certs wired up; yt-dlp needs them for HTTPS.
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
+import logging
 import re
 import secrets
 import shutil
 import socket
-import subprocess
 import tempfile
 import threading
 import time
@@ -25,14 +25,13 @@ from flask import Flask, jsonify, request, send_file, send_from_directory
 
 import yt_dlp
 
+import transcript
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("grab")
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-WHISPER_MODEL = os.path.join(APP_DIR, "models", "ggml-base.bin")
-# Prefer our native arm64+Metal build (GPU, ~65x realtime); the Homebrew one
-# in /usr/local is an Intel binary that crawls under Rosetta on this Mac.
-_local_whisper = os.path.join(APP_DIR, "bin", "whisper-cli")
-WHISPER_BIN = (_local_whisper if os.path.exists(_local_whisper)
-               else shutil.which("whisper-cli") or shutil.which("whisper-cpp"))
-MAX_TRANSCRIBE_SECONDS = 20 * 60  # refuse to whisper-transcribe longer videos
 
 app = Flask(__name__, static_folder="static")
 
@@ -46,14 +45,18 @@ def index():
 
 
 def ydl_base(tmp):
-    return {
+    o = {
         "outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"),
         "noplaylist": True,
         "quiet": True,
         "noprogress": True,
         "no_warnings": True,
         "restrictfilenames": True,
+        "socket_timeout": 30,
     }
+    if os.path.exists(transcript.COOKIES):  # helps with login-walled posts
+        o["cookiefile"] = transcript.COOKIES
+    return o
 
 
 def safe_name(title, ext):
@@ -102,11 +105,19 @@ def set_job(key, **kw):
             JOBS[key].update(kw, at=time.time())
 
 
+STUCK_AFTER = 30 * 60  # a job "running" this long is dead — unblock the user
+
+
 def prune():
     now = time.time()
     with JOBS_LOCK:
         for k in [k for k, j in JOBS.items() if now - j["at"] > JOB_KEEP_SECONDS]:
             del JOBS[k]
+        for k, j in JOBS.items():
+            if j["status"] == "running" and now - j.get("started", now) > STUCK_AFTER:
+                log.error("job %s stuck >%ss, marking failed", k, STUCK_AFTER)
+                j.update(status="error", at=now,
+                         error="This task got stuck and was cancelled — try again.")
         for t in [t for t, v in READY.items() if now - v[3] > READY_TTL]:
             shutil.rmtree(READY.pop(t)[2], ignore_errors=True)
 
@@ -147,20 +158,17 @@ def job_api():
             if stale and not data.get("poll"):
                 del JOBS[key]
             else:
-                return jsonify({k: v for k, v in job.items() if k != "at"})
-        if kind == "script" and any(
-                k.startswith("script|") and j["status"] == "running"
-                for k, j in JOBS.items()):
-            return jsonify(error="Another script is still being prepared — "
-                                 "wait for it to finish."), 429
+                return jsonify({k: v for k, v in job.items()
+                                if k not in ("at", "started")})
         JOBS[key] = {"status": "running", "progress": None,
-                     "stage": "Starting…", "fast": bool(data.get("fast")),
-                     "at": time.time()}
+                     "stage": "Starting…", "at": time.time(),
+                     "started": time.time()}
 
     worker = script_worker if kind == "script" else download_worker
     threading.Thread(target=worker, args=(key, url, kind), daemon=True).start()
     with JOBS_LOCK:
-        return jsonify({k: v for k, v in JOBS[key].items() if k != "at"})
+        return jsonify({k: v for k, v in JOBS[key].items()
+                        if k not in ("at", "started")})
 
 
 # Old page versions (cached on phones) still POST here — same job machinery.
@@ -232,140 +240,42 @@ def download_worker(key, url, kind):
         token = secrets.token_urlsafe(16)
         with JOBS_LOCK:
             READY[token] = (path, safe_name(i.get("title"), ext), tmp, time.time())
+        log.info("download done %s: %s", kind, READY[token][1])
         set_job(key, status="done", stage="Ready", progress=100,
                 token=token, size=os.path.getsize(path))
     except Exception as e:
+        log.warning("download failed %s %s: %s", kind, url, e)
         shutil.rmtree(tmp, ignore_errors=True)
         set_job(key, status="error", error=friendly(e))
 
 
 def script_worker(key, url, kind):
+    """Run the transcript pipeline (transcript.py) as a polled job."""
     tmp = tempfile.mkdtemp(prefix="grab_")
+
+    def report(stage, progress):
+        set_job(key, stage=stage, progress=progress)
+
+    # At most two transcripts at once; extra requests queue instead of failing.
+    queued = not SCRIPT_SLOTS.acquire(blocking=False)
+    if queued:
+        report("Waiting for a free slot…", None)
+        SCRIPT_SLOTS.acquire()
     try:
-        set_job(key, stage="Checking captions", progress=None)
-        text = captions_text(url, tmp)
-        source = "captions"
-        if not text:
-            duration = video_duration(url)
-            if duration and duration > MAX_TRANSCRIBE_SECONDS:
-                raise RuntimeError(
-                    f"This video is {duration // 60} min long and has no captions. "
-                    f"Local transcription is capped at {MAX_TRANSCRIBE_SECONDS // 60} "
-                    f"min to avoid overheating this Mac.")
-            set_job(key, stage="Downloading audio", progress=0)
-            with JOBS_LOCK:
-                fast = JOBS.get(key, {}).get("fast", False)
-            text = whisper_text(key, url, tmp, fast)
-            source = "transcription"
-        if not text:
-            raise RuntimeError("No captions found and local transcription is not set "
-                               "up (whisper-cli or its model file is missing).")
+        text, source = transcript.get_transcript(url, tmp, report)
         set_job(key, status="done", stage="Ready", progress=100,
                 text=text, source=source)
+    except transcript.TranscriptError as e:
+        set_job(key, status="error", error=str(e))
     except Exception as e:
-        set_job(key, status="error", error=friendly(e))
+        log.exception("script job crashed: %s", url)
+        set_job(key, status="error", error="Unexpected error: " + str(e)[:200])
     finally:
+        SCRIPT_SLOTS.release()
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-# ---------------------------------------------------------------------------
-# Captions & transcription
-# ---------------------------------------------------------------------------
-# Caption languages we accept, in order of preference. Asking for "all" gets
-# rate-limited (429) by YouTube and pulls auto-translated junk like "en-de".
-CAPTION_LANGS = ["en", "de", "ar", "fr"]
-
-
-def captions_text(url, tmp):
-    """Try platform-provided captions/auto-captions first (free and instant)."""
-    opts = ydl_base(tmp) | {
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitlesformat": "vtt/srt/best",
-        # Exact codes only — patterns like "en.*" also match auto-translated
-        # pairs ("en-de"), which triggers extra downloads and 429 rate limits.
-        "subtitleslangs": CAPTION_LANGS + ["en-US", "en-GB", "de-DE", "fr-FR"],
-    }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.extract_info(url, download=True)
-    except Exception:
-        return None
-    subs = glob.glob(os.path.join(tmp, "*.vtt")) + glob.glob(os.path.join(tmp, "*.srt"))
-    if not subs:
-        return None
-
-    def rank(path):  # files look like <id>.<lang>.vtt — prefer our language order
-        lang = path.rsplit(".", 2)[-2].lower()
-        for n, code in enumerate(CAPTION_LANGS):
-            if lang == code or lang.startswith(code + "-"):
-                return n
-        return len(CAPTION_LANGS)
-
-    return parse_subs(min(subs, key=rank))
-
-
-def parse_subs(path):
-    lines, last = [], None
-    with open(path, encoding="utf-8", errors="replace") as f:
-        for raw in f:
-            line = re.sub(r"<[^>]+>", "", raw).strip()
-            if (not line or "-->" in line or line.isdigit()
-                    or line.startswith(("WEBVTT", "Kind:", "Language:", "NOTE"))):
-                continue
-            if line != last:  # auto-captions repeat lines as they scroll
-                lines.append(line)
-                last = line
-    return "\n".join(lines) or None
-
-
-def video_duration(url):
-    try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as ydl:
-            i = ydl.extract_info(url, download=False)
-        if i.get("_type") == "playlist":
-            i = (i.get("entries") or [{}])[0]
-        return i.get("duration")
-    except Exception:
-        return None
-
-
-def whisper_text(key, url, tmp, fast=False):
-    """Fallback: download the audio and transcribe locally with whisper.cpp.
-    Audio download maps to 0–25% of the bar, transcription to 25–100%."""
-    if not WHISPER_BIN or not os.path.exists(WHISPER_MODEL):
-        return None
-    opts = ydl_base(tmp) | {
-        "format": "bestaudio/best",
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
-        "postprocessor_args": ["-ar", "16000", "-ac", "1"],
-        "progress_hooks": [progress_hook(key, 0, 25)],
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.extract_info(url, download=True)
-    wavs = glob.glob(os.path.join(tmp, "*.wav"))
-    if not wavs:
-        return None
-
-    set_job(key, stage="Transcribing (fast)" if fast else "Transcribing", progress=25)
-    out = os.path.join(tmp, "transcript")
-    # Quiet mode: 2 threads at lowest priority — slow but the fan stays calm.
-    # Fast mode (the ⚡ toggle): most cores, normal-ish priority — 3-4x faster.
-    threads = max(2, (os.cpu_count() or 4) - 2) if fast else 2
-    niceness = "5" if fast else "19"
-    proc = subprocess.Popen(
-        ["nice", "-n", niceness, WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wavs[0],
-         "-l", "auto", "-t", str(threads), "--print-progress", "-otxt", "-of", out],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    for line in proc.stderr:  # "whisper_print_progress_callback: progress = 15%"
-        m = re.search(r"progress\s*=\s*(\d+)%", line)
-        if m:
-            set_job(key, progress=round(25 + int(m.group(1)) * 0.75))
-    if proc.wait(timeout=1800) != 0:
-        raise RuntimeError("Transcription failed")
-    with open(out + ".txt", encoding="utf-8") as f:
-        return f.read().strip() or None
+SCRIPT_SLOTS = threading.Semaphore(2)
 
 
 def friendly(e):

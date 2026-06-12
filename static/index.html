@@ -191,7 +191,6 @@
     </div>
     <div class="link-actions">
       <button class="paste-btn" id="pasteBtn">📋 Paste link</button>
-      <button class="fast-chip" id="fastChip" title="Faster transcription, louder fan">⚡ Fast mode</button>
     </div>
   </div>
   <div class="card" id="infoCard">
@@ -280,17 +279,6 @@
     infoTimer = setTimeout(fetchInfo, 400);
   });
 
-  // ---------- Fast mode (⚡ more CPU, faster transcription) ----------
-  let fastMode = localStorage.getItem("grab.fast") === "1";
-  function renderFast() { $("fastChip").classList.toggle("on", fastMode); }
-  $("fastChip").addEventListener("click", () => {
-    fastMode = !fastMode;
-    localStorage.setItem("grab.fast", fastMode ? "1" : "0");
-    renderFast();
-    toast(fastMode ? "⚡ Fast mode on — louder fan, quicker scripts"
-                   : "Quiet mode — slower scripts, calm fan");
-  });
-  renderFast();
 
   const fmtDur = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
@@ -359,7 +347,7 @@
     try {
       const r = await fetch("/api/job", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, kind, poll, fast: fastMode }),
+        body: JSON.stringify({ url, kind, poll }),
       });
       const d = await r.json();
       if (!r.ok) { jobDone(kind, { status: "error", error: d.error }); return; }

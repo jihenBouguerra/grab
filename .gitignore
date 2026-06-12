@@ -4,3 +4,5 @@ bin/
 server.log
 __pycache__/
 .DS_Store
+tunnel.log
+cookies.txt
