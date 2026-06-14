@@ -322,6 +322,23 @@
 
   refreshBackendStatus();
 
+  // Warn if running on Workers with no backend configured
+  function requireBackend() {
+    if (backendUrl) return true;
+    const isLocal = location.hostname === "localhost" || location.hostname.match(/^192\.168\.|^10\.|^172\./);
+    if (isLocal) return true;
+    $("backendDrawer").style.display = "block";
+    $("backendInput").focus();
+    toast("Set your backend URL first ⚙");
+    return false;
+  }
+
+  async function safeJson(r) {
+    const text = await r.text();
+    try { return JSON.parse(text); }
+    catch { throw new Error(text.slice(0, 200) || "Empty response — is the backend running?"); }
+  }
+
   // ---------- Toast ----------
   let toastTimer;
   function toast(msg) {
@@ -370,13 +387,14 @@
   const fmtDur = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
   async function fetchInfo() {
+    if (!requireBackend()) return;
     setStatus("Looking up link…", "", true);
     try {
       const r = await fetch(api("/api/info"), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: urlEl.value.trim() }),
       });
-      const d = await r.json();
+      const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error);
       $("title").textContent = d.title || "Untitled";
       $("meta").textContent = [d.uploader, d.duration && fmtDur(d.duration)].filter(Boolean).join(" · ");
@@ -436,7 +454,7 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, kind, poll }),
       });
-      const d = await r.json();
+      const d = await safeJson(r);
       if (!r.ok) { jobDone(kind, { status: "error", error: d.error }); return; }
       if (d.status === "running") {
         const mins = Math.floor((Date.now() - scriptStartedAt) / 60000);
@@ -449,6 +467,7 @@
   }
 
   function startJob(kind) {
+    if (!requireBackend()) return;
     const url = urlEl.value.trim();
     if (!url) { toast("Paste a link first"); return; }
     if (activeJob) { toast("Wait for the current task to finish"); return; }
