@@ -43,6 +43,31 @@
   h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
   h1 .spark { color: var(--accent); }
   .header-sub { color: var(--text-dim); font-size: 0.8rem; }
+  .settings-btn {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 1.15rem; cursor: pointer; padding: 4px 6px; line-height: 1;
+    border-radius: 8px;
+  }
+  .settings-btn:active { background: var(--surface-2); }
+  /* ---------- Backend URL drawer ---------- */
+  #backendDrawer {
+    display: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px; margin-bottom: 14px;
+  }
+  #backendDrawer label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; }
+  #backendDrawer p { font-size: 0.78rem; color: var(--text-dim); margin-bottom: 10px; line-height: 1.5; }
+  .backend-row { display: flex; gap: 8px; }
+  #backendInput {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 11px 14px; color: var(--text);
+    font-size: 0.9rem; outline: none; font-family: inherit;
+  }
+  #backendInput:focus { border-color: var(--accent); }
+  #backendSave {
+    background: var(--accent); color: #fff; border: none; border-radius: 12px;
+    padding: 11px 18px; font-size: 0.88rem; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .backend-status { font-size: 0.78rem; margin-top: 8px; color: var(--text-dim); }
   /* ---------- Main ---------- */
   main { padding: 16px; max-width: 680px; margin: 0 auto; padding-bottom: calc(env(safe-area-inset-bottom) + 40px); }
   /* ---------- Link card ---------- */
@@ -187,11 +212,24 @@
 <header>
   <div class="header-row">
     <h1><span class="spark">✦</span> Grab</h1>
-    <span class="header-sub">video · audio · script</span>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="header-sub">video · audio · script</span>
+      <button class="settings-btn" id="settingsBtn" title="Backend URL">⚙</button>
+    </div>
   </div>
 </header>
 
 <main>
+  <div id="backendDrawer">
+    <label>Backend URL</label>
+    <p>Paste your Mac's tunnel URL here so the app knows where to send requests. Get it by running <code style="background:var(--bg);padding:2px 6px;border-radius:6px;font-size:0.85em">./start.command</code> on your Mac.</p>
+    <div class="backend-row">
+      <input id="backendInput" type="url" placeholder="https://xxx.trycloudflare.com" autocomplete="off" spellcheck="false">
+      <button id="backendSave">Save</button>
+    </div>
+    <div class="backend-status" id="backendStatus"></div>
+  </div>
+
   <div class="link-card">
     <label for="url">Link — Instagram, TikTok, YouTube, X…</label>
     <div class="url-row">
@@ -245,6 +283,45 @@
   const urlEl = $("url"), statusEl = $("status");
   let infoTimer = null, pollTimer = null, scriptStartedAt = 0;
 
+  // ---------- Backend URL ----------
+  // When hosted on Cloudflare Workers the frontend has no backend.
+  // User pastes the tunnel URL once; it's saved to localStorage.
+  // When running locally the default empty string means relative URLs.
+  let backendUrl = (localStorage.getItem("grabBackend") || "").replace(/\/$/, "");
+  const api = path => backendUrl + path;
+
+  function refreshBackendStatus() {
+    const s = $("backendStatus");
+    if (backendUrl) {
+      s.style.color = "var(--green)";
+      s.textContent = "Connected to: " + backendUrl;
+      $("settingsBtn").style.color = "var(--green)";
+    } else {
+      s.style.color = "var(--text-dim)";
+      s.textContent = "Using local server (localhost)";
+      $("settingsBtn").style.color = "";
+    }
+    $("backendInput").value = backendUrl;
+  }
+
+  $("settingsBtn").addEventListener("click", () => {
+    const d = $("backendDrawer");
+    d.style.display = d.style.display === "block" ? "none" : "block";
+    if (d.style.display === "block") $("backendInput").focus();
+  });
+
+  $("backendSave").addEventListener("click", () => {
+    const val = $("backendInput").value.trim().replace(/\/$/, "");
+    backendUrl = val;
+    if (val) localStorage.setItem("grabBackend", val);
+    else localStorage.removeItem("grabBackend");
+    refreshBackendStatus();
+    $("backendDrawer").style.display = "none";
+    toast(val ? "Backend saved ✓" : "Cleared — using local server");
+  });
+
+  refreshBackendStatus();
+
   // ---------- Toast ----------
   let toastTimer;
   function toast(msg) {
@@ -295,7 +372,7 @@
   async function fetchInfo() {
     setStatus("Looking up link…", "", true);
     try {
-      const r = await fetch("/api/info", {
+      const r = await fetch(api("/api/info"), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: urlEl.value.trim() }),
       });
@@ -347,7 +424,7 @@
       setStatus("Script ready", "ok");
       toast("Script ready ✓");
     } else {
-      window.location.href = "/api/take/" + d.token;
+      window.location.href = api("/api/take/") + d.token;
       setStatus(`Saving ${(d.size / 1048576).toFixed(1)} MB — check your downloads`, "ok");
       toast("Download started ✓");
     }
@@ -355,7 +432,7 @@
 
   async function jobTick(kind, url, poll) {
     try {
-      const r = await fetch("/api/job", {
+      const r = await fetch(api("/api/job"), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, kind, poll }),
       });
