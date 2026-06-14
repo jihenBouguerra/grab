@@ -36,20 +36,6 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder="static")
 
 
-@app.after_request
-def add_cors(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return response
-
-
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS":
-        return "", 204
-
-
 @app.get("/")
 def index():
     resp = send_from_directory(app.static_folder, "index.html")
