@@ -299,6 +299,8 @@ def lan_ip():
 
 
 if __name__ == "__main__":
-    print(f"\n  On this Mac:    http://localhost:5001")
-    print(f"  On your phone:  http://{lan_ip()}:5001  (same Wi-Fi)\n")
-    app.run(host="0.0.0.0", port=5001, threaded=True)
+    port = int(os.environ.get("PORT", 5001))
+    if port == 5001:
+        print(f"\n  On this Mac:    http://localhost:5001")
+        print(f"  On your phone:  http://{lan_ip()}:5001  (same Wi-Fi)\n")
+    app.run(host="0.0.0.0", port=port, threaded=True)

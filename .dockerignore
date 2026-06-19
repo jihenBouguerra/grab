@@ -1,0 +1,11 @@
+.venv/
+bin/
+models/
+__pycache__/
+*.log
+*.plist
+.DS_Store
+cookies.txt
+screenshots/
+setup.sh
+start.command
