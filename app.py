@@ -53,6 +53,8 @@ def ydl_base(tmp):
         "no_warnings": True,
         "restrictfilenames": True,
         "socket_timeout": 30,
+        # Use Android client to avoid bot detection on cloud server IPs
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
     if os.path.exists(transcript.COOKIES):  # helps with login-walled posts
         o["cookiefile"] = transcript.COOKIES

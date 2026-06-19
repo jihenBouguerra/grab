@@ -38,7 +38,8 @@ class TranscriptError(Exception):
 
 def _opts(tmp=None):
     o = {"quiet": True, "noprogress": True, "no_warnings": True,
-         "noplaylist": True, "socket_timeout": 30}
+         "noplaylist": True, "socket_timeout": 30,
+         "extractor_args": {"youtube": {"player_client": ["android", "web"]}}}
     if tmp:
         o["outtmpl"] = os.path.join(tmp, "media.%(ext)s")
     if os.path.exists(COOKIES):
