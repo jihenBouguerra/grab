@@ -39,7 +39,7 @@ class TranscriptError(Exception):
 def _opts(tmp=None):
     o = {"quiet": True, "noprogress": True, "no_warnings": True,
          "noplaylist": True, "socket_timeout": 30,
-         "extractor_args": {"youtube": {"player_client": ["android", "web"]}}}
+         "extractor_args": {"youtube": {"player_client": ["ios", "android", "tv_embedded"]}}}
     if tmp:
         o["outtmpl"] = os.path.join(tmp, "media.%(ext)s")
     if os.path.exists(COOKIES):
@@ -198,9 +198,13 @@ def _friendly(e):
     low = msg.lower()
     if "unsupported url" in low:
         return "That link isn't supported — try the direct link to the post."
-    if "login" in low or "cookies" in low or "private" in low or "authentication" in low:
+    if "sign in to confirm" in low or ("bot" in low and "confirm" in low):
+        return "YouTube is blocking this server's IP as a bot. Try a different video or use TikTok/Instagram instead."
+    if "login" in low or "private" in low or "authentication" in low:
         return ("This post needs a login to access (common on Instagram). "
                 "Export your browser cookies to grab/cookies.txt to fix this.")
+    if "cookies" in low:
+        return "YouTube is blocking requests from this server. Try a different platform or video."
     if "429" in msg or "rate" in low:
         return "The platform is rate-limiting us — wait a minute and retry."
     if "geo" in low or "country" in low:
