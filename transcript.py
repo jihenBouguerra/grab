@@ -12,13 +12,20 @@ TranscriptError with a message meant for the user's eyes.
 """
 
 import glob
+import json
 import logging
 import os
 import re
+import ssl
 import subprocess
 import threading
+import time
+import urllib.request
 
+import certifi
 import yt_dlp
+
+_SSL = ssl.create_default_context(cafile=certifi.where())
 
 log = logging.getLogger("grab.transcript")
 
@@ -29,7 +36,8 @@ WHISPER_BIN = _local if os.path.exists(_local) else None
 COOKIES = os.path.join(APP_DIR, "cookies.txt")  # optional, helps Instagram
 
 CAPTION_LANGS = ["en", "de", "ar", "fr"]   # preference order
-MAX_DURATION = 30 * 60                     # refuse longer whisper jobs
+# 0 = no limit (transcribe any length). Override with GRAB_MAX_MINUTES.
+MAX_DURATION = int(os.environ.get("GRAB_MAX_MINUTES", "0")) * 60
 
 
 class TranscriptError(Exception):
@@ -57,7 +65,7 @@ def get_transcript(url, tmp, report):
     lang = _best_caption_lang(info)
     if lang:
         report("Fetching captions", None)
-        text = _fetch_captions(url, tmp, lang)
+        text = _fetch_captions(info, lang, report)
         if text:
             log.info("script done via captions[%s]: %d chars", lang, len(text))
             return text, "captions"
@@ -66,7 +74,7 @@ def get_transcript(url, tmp, report):
     if not WHISPER_BIN or not os.path.exists(WHISPER_MODEL):
         raise TranscriptError("This video has no captions, and local "
                               "transcription isn't set up (run ./setup.sh).")
-    if duration and duration > MAX_DURATION:
+    if MAX_DURATION and duration and duration > MAX_DURATION:
         raise TranscriptError(
             f"This video is {duration // 60} min long and has no captions — "
             f"transcription is capped at {MAX_DURATION // 60} min.")
@@ -95,47 +103,91 @@ def _probe(url):
     return info
 
 
+def _caption_tracks(info):
+    """All caption tracks from the probe, manual subtitles winning over auto."""
+    return {**(info.get("automatic_captions") or {}),
+            **(info.get("subtitles") or {})}
+
+
 def _best_caption_lang(info):
-    """Pick the best available caption language from the probe — so we ask
-    the platform for exactly one subtitle file (asking broadly = HTTP 429)."""
-    for source in ("subtitles", "automatic_captions"):  # manual first
-        available = info.get(source) or {}
-        for want in CAPTION_LANGS:
-            for code in available:
-                if code == want or code.startswith(want + "-"):
-                    return code
+    """Prefer the video's ORIGINAL spoken language. Asking for a language the
+    video wasn't recorded in (e.g. 'en' on an Arabic video) forces YouTube to
+    machine-translate on the fly — those requests get rate-limited (HTTP 429)
+    and are slow. The native track is served instantly."""
+    available = _caption_tracks(info)
+    if not available:
+        return None
+    orig = info.get("language")
+    # 1. original language (+ its '-orig' auto track), 2. any '-orig' track,
+    # 3. the user's preference list, 4. anything that exists.
+    wants = []
+    if orig:
+        wants += [orig, orig + "-orig"]
+    wants += [c for c in available if c.endswith("-orig")]
+    wants += CAPTION_LANGS
+    wants += list(available)
+    for want in wants:
+        for code in available:  # 'en' should also match 'en-US' etc.
+            if code == want or code.startswith(want + "-"):
+                return code
     return None
 
 
-def _fetch_captions(url, tmp, lang):
-    o = _opts(tmp) | {
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": [lang],
-        "subtitlesformat": "vtt/srt/best",
-    }
-    try:
-        with yt_dlp.YoutubeDL(o) as ydl:
-            ydl.extract_info(url, download=True)
-    except Exception as e:
-        log.warning("caption fetch failed: %s", e)
-        return None
-    subs = glob.glob(os.path.join(tmp, "*.vtt")) + glob.glob(os.path.join(tmp, "*.srt"))
-    return _parse_subs(subs[0]) if subs else None
+def _fetch_captions(info, lang, report=None):
+    """Download the caption track directly from the URL the probe already gave
+    us — one clean request, no second yt-dlp extraction. json3 preferred."""
+    entries = _caption_tracks(info).get(lang) or []
+    pref = ["json3", "srv3", "vtt", "srt", "srv1", "srv2", "ttml"]
+    entries = sorted(
+        entries,
+        key=lambda e: pref.index(e["ext"]) if e.get("ext") in pref else 99)
+    for e in entries:
+        url = e.get("url")
+        if not url:
+            continue
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "Mozilla/5.0"})
+                data = urllib.request.urlopen(req, timeout=20, context=_SSL).read()
+            except Exception as ex:
+                if "429" in str(ex) and attempt == 0:
+                    if report:
+                        report("Captions busy, retrying…", None)
+                    time.sleep(2)
+                    continue
+                log.warning("caption fetch failed (%s): %s", e.get("ext"), ex)
+                break
+            text = _parse_caption(data, e.get("ext"))
+            if text:
+                return text
+            break  # got the file but it was empty — try next format
+    return None
 
 
-def _parse_subs(path):
+def _parse_caption(data, ext):
+    if ext == "json3":
+        try:
+            events = json.loads(data).get("events", [])
+        except Exception:
+            return None
+        out, last = [], None
+        for ev in events:
+            seg = "".join(s.get("utf8", "") for s in (ev.get("segs") or [])).strip()
+            if seg and seg != last:
+                out.append(seg)
+                last = seg
+        return "\n".join(out) or None
+    # vtt / srt / ttml: strip tags + cue timing, dedupe scrolling repeats
     lines, last = [], None
-    with open(path, encoding="utf-8", errors="replace") as f:
-        for raw in f:
-            line = re.sub(r"<[^>]+>", "", raw).strip()
-            if (not line or "-->" in line or line.isdigit()
-                    or line.startswith(("WEBVTT", "Kind:", "Language:", "NOTE"))):
-                continue
-            if line != last:  # auto-captions repeat lines as they scroll
-                lines.append(line)
-                last = line
+    for raw in data.decode("utf-8", "replace").splitlines():
+        line = re.sub(r"<[^>]+>", "", raw).strip()
+        if (not line or "-->" in line or line.isdigit()
+                or line.startswith(("WEBVTT", "Kind:", "Language:", "NOTE"))):
+            continue
+        if line != last:  # auto-captions repeat lines as they scroll
+            lines.append(line)
+            last = line
     return "\n".join(lines) or None
 
 
@@ -168,13 +220,14 @@ def _fetch_audio(url, tmp, report):
 def _whisper(wav, tmp, duration, report):
     out = os.path.join(tmp, "transcript")
     cmd = [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav, "-l", "auto",
-           "-t", "4", "--print-progress", "-otxt", "-of", out]
+           "-t", str(os.environ.get("GRAB_WHISPER_THREADS", "8")),
+           "--print-progress", "-otxt", "-of", out]
     log.info("whisper start (%ss of audio)", duration)
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                             stderr=subprocess.PIPE, text=True)
-    # Watchdog: GPU transcription runs ~60x realtime; duration/2 + 120s is
-    # generous. A hung process gets killed instead of blocking jobs forever.
-    timer = threading.Timer(max(180, duration / 2 + 120), proc.kill)
+    # Watchdog: only kills a genuinely hung process. Allow up to ~2x realtime
+    # + 5 min so even slow CPU transcription of a long video finishes.
+    timer = threading.Timer(max(300, duration * 2 + 300), proc.kill)
     timer.start()
     try:
         for line in proc.stderr:  # "...progress = 15%"

@@ -33,6 +33,12 @@ log = logging.getLogger("grab")
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Where ffmpeg/ffprobe actually live (Homebrew puts them in /usr/local/bin or
+# /opt/homebrew/bin, NOT /usr/bin). Detect instead of hardcoding so downloads
+# don't fail with "ffmpeg not found" on machines with a different layout.
+_ffmpeg = shutil.which("ffmpeg") or "/usr/local/bin/ffmpeg"
+FFMPEG_DIR = os.path.dirname(_ffmpeg)
+
 app = Flask(__name__, static_folder="static")
 
 
@@ -53,6 +59,7 @@ def ydl_base(tmp):
         "no_warnings": True,
         "restrictfilenames": True,
         "socket_timeout": 30,
+        "ffmpeg_location": FFMPEG_DIR,
         # Use mobile/TV clients to avoid bot detection on cloud server IPs
         "extractor_args": {"youtube": {"player_client": ["ios", "android", "tv_embedded"]}},
     }
@@ -107,7 +114,9 @@ def set_job(key, **kw):
             JOBS[key].update(kw, at=time.time())
 
 
-STUCK_AFTER = 30 * 60  # a job "running" this long is dead — unblock the user
+# a job "running" this long is treated as dead — generous so long videos
+# (multi-hour transcription / large downloads) finish. Override w/ env.
+STUCK_AFTER = int(os.environ.get("GRAB_STUCK_HOURS", "6")) * 3600
 
 
 def prune():
